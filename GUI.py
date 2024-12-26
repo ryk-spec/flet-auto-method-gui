@@ -94,7 +94,7 @@ class StdoutRedirector:
 
     def write(self, message: str) -> None:
         # Check if message represents a Matplotlib Figure
-        if os.path.splitext(message)[-1]  in [".png",".jpg",".bmp"]:
+        if os.path.splitext(message)[-1]  in [".png",".jpg",".bmp"] and os.path.exists(message) is True:
             self._figure_callback(message)
         else:
             self._stdout_callback(message)
