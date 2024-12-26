@@ -12,16 +12,27 @@ Example showing:
 7. Display selected file path in a read-only TextField.
 """
 
-import sys
+import sys,os,time,base64
 import inspect
-from io import StringIO
-
 import flet as ft
 import matplotlib.pyplot as plt
-from flet.matplotlib_chart import MatplotlibChart
-from matplotlib.figure import Figure
 
-
+def encode_image_to_base64(image_path):
+    with open(image_path, "rb") as img_file:
+        img_bytes = img_file.read()
+        encoded_img = base64.b64encode(img_bytes).decode('utf-8')
+        # 画像の形式に応じて適切なMIMEタイプを設定
+        ext = os.path.splitext(image_path)[1].lower()
+        if ext == ".png":
+            mime = "image/png"
+        elif ext in [".jpg", ".jpeg"]:
+            mime = "image/jpeg"
+        elif ext == ".gif":
+            mime = "image/gif"
+        else:
+            mime = "application/octet-stream"
+        return encoded_img
+    
 class FileInput:
     """
     Represents a file selection requirement for a method argument.
@@ -74,27 +85,25 @@ class MethodAnalyzer:
 class StdoutRedirector:
     """
     Redirects sys.stdout to update a Flet Text or similar UI component in real-time.
+    Detects Matplotlib Figure objects and updates the UI with the figure.
     """
 
-    def __init__(self, callback) -> None:
-        self._buffer = StringIO()
-        self._callback = callback
+    def __init__(self, stdout_callback, figure_callback) -> None:
+        self._stdout_callback = stdout_callback
+        self._figure_callback = figure_callback
 
     def write(self, message: str) -> None:
-        self._buffer.write(message)
-        self._callback(message)
+        # Check if message represents a Matplotlib Figure
+        if os.path.splitext(message)[-1]  in [".png",".jpg",".bmp"]:
+            self._figure_callback(message)
+        else:
+            self._stdout_callback(message)
 
     def flush(self) -> None:
         """Required for file-like object. (No special action needed here.)"""
-
+        pass
 
 class UIBuilder:
-    """
-    Builds a dynamic Flet GUI based on the analyzed arguments.
-    - 3-column layout for arguments
-    - 2-column layout for (MatplotlibChart + stdout_text)
-    """
-
     def __init__(self, method, page: ft.Page):
         self.method = method
         self.page = page
@@ -108,15 +117,34 @@ class UIBuilder:
         # Redirect stdout
         self.original_stdout = sys.stdout
         self.stdout_text = ft.Text(value="==以下にprint内容==", selectable=True, expand=1)
-        self.chart = MatplotlibChart(plt.figure(),expand=True)  # dummy figure
-        self.stdout_redirector = StdoutRedirector(self.update_stdout_text)
+        self.chart = ft.Image()  # dummy figure
+        self.stdout_redirector = StdoutRedirector(
+            self.update_stdout_text,
+            self.update_figure
+        )
         sys.stdout = self.stdout_redirector
 
         # Create layout containers for 3 columns (arguments area)
-        self.col1 = ft.Column(spacing=10, expand=1,width=450)
-        self.col2 = ft.Column(spacing=10, expand=1,width=450)
-        self.col3 = ft.Column(spacing=10, expand=1,width=450)
+        self.col1 = ft.Column(spacing=10, expand=1, width=450)
+        self.col2 = ft.Column(spacing=10, expand=1, width=450)
+        self.col3 = ft.Column(spacing=10, expand=1, width=450)
         self.arg_row = ft.Row(controls=[self.col1, self.col2, self.col3], spacing=20)
+
+    def update_stdout_text(self, message) -> None:
+        """
+        Append new print outputs to the stdout_text control.
+        """
+        self.stdout_text.value += message
+        self.page.update()
+        
+    def update_figure(self, message) -> None:
+        """
+        Updates the Matplotlib chart in the GUI with the given figure.
+        """
+        img_src = encode_image_to_base64(message)
+        self.chart.src_base64 = img_src
+        self.page.update()
+
 
     def build_ui(self) -> None:
         """
@@ -249,8 +277,7 @@ class UIBuilder:
         """
         Collects input values, calls the method, and updates the GUI with outputs.
         """
-        # Clear current stdout text
-        self.stdout_text.value = ""
+        self.stdout_text.value = ""  # Clear current stdout text
 
         # Build arguments from input controls
         args_dict = {}
@@ -266,7 +293,6 @@ class UIBuilder:
                 args_dict[name] = ctrl_info["dropdown"].value
             elif ctrl_info["type"] == "text":
                 raw_value = ctrl_info["field"].value
-                # Convert to int if the original default was int
                 if isinstance(default_val, int):
                     try:
                         raw_value = int(raw_value)
@@ -274,40 +300,31 @@ class UIBuilder:
                         pass
                 args_dict[name] = raw_value
 
-        result = self.method(**args_dict)
 
-        # If the method returns a Matplotlib Figure, update the chart
-        if isinstance(result, Figure):
-            self.chart.figure = result
+        # my_method を実行
+        self.method(**args_dict)
 
-        self.page.update()
-
-    def update_stdout_text(self, message: str) -> None:
-        """
-        Append new print outputs to the stdout_text control.
-        """
-        self.stdout_text.value += message
         self.page.update()
 
 
 def my_method(
     file: FileInput = FileInput("Upload a file"),
     choice: ChoiceInput = ChoiceInput(["Option 1", "Option 2", "Option 3"]),
-    number: int = 5
-) -> Figure:
+    number: int = 5,
+):
     """
-    Example method demonstrating:
+    Example method:
     1. FileInput
     2. ChoiceInput
     3. Integer input
     4. Printing outputs (redirected to the Flet UI)
-    5. Returning a Matplotlib figure
+    5. Generating a Matplotlib figure
     """
     print(f"file   : {file}")
     print(f"choice : {choice}")
     print(f"number : {number}")
 
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=(4, 4))
     x_data = list(range(1, number + 1))
     y_data = [x**2 for x in x_data]
     ax.plot(x_data, y_data, label="y = x^2", marker="o")
@@ -315,11 +332,12 @@ def my_method(
     ax.set_xlabel("X-axis")
     ax.set_ylabel("Y-axis")
     ax.legend()
+    fig.savefig("temp.jpg",dpi=300)
+    print("temp.jpg")
 
-    # Print the figure object
-    print(fig)
 
-
+    # 必要なら何も返さなくてもOK
+    # return fig  # ← 不要なら削除
 
 def gui_run(my_method) -> None:
     """
@@ -329,11 +347,6 @@ def gui_run(my_method) -> None:
         """
         Entry point for the Flet application.
         """
-        page.title = "Class-based Flet & Matplotlib Demo (3-column & 2-column layout)"
-        page.scroll = "auto"
-
-        ui_builder = UIBuilder(my_method, page)
-        ui_builder.build_ui()
         page.title = "Class-based Flet & Matplotlib Demo (3-column & 2-column layout)"
         page.scroll = "auto"
 
