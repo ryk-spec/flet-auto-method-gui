@@ -307,38 +307,6 @@ class UIBuilder:
         self.page.update()
 
 
-def my_method(
-    file: FileInput = FileInput("Upload a file"),
-    choice: ChoiceInput = ChoiceInput(["Option 1", "Option 2", "Option 3"]),
-    number: int = 5,
-):
-    """
-    Example method:
-    1. FileInput
-    2. ChoiceInput
-    3. Integer input
-    4. Printing outputs (redirected to the Flet UI)
-    5. Generating a Matplotlib figure
-    """
-    print(f"file   : {file}")
-    print(f"choice : {choice}")
-    print(f"number : {number}")
-
-    fig, ax = plt.subplots(figsize=(4, 4))
-    x_data = list(range(1, number + 1))
-    y_data = [x**2 for x in x_data]
-    ax.plot(x_data, y_data, label="y = x^2", marker="o")
-    ax.set_title("Sample Plot")
-    ax.set_xlabel("X-axis")
-    ax.set_ylabel("Y-axis")
-    ax.legend()
-    fig.savefig("temp.jpg",dpi=300)
-    print("temp.jpg")
-
-
-    # 必要なら何も返さなくてもOK
-    # return fig  # ← 不要なら削除
-
 def gui_run(my_method) -> None:
     """
     Entry point for the Flet application.
@@ -353,5 +321,3 @@ def gui_run(my_method) -> None:
         ui_builder = UIBuilder(my_method, page)
         ui_builder.build_ui()
     ft.app(target=main)
-
-gui_run(my_method=my_method)
