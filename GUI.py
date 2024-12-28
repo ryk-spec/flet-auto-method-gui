@@ -1,323 +1,59 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+from flet import Page, Column, Container,app
+from widget import LogWidget, FileDialogWidget, DropdownWidget, ImageWidget, InputWidget
 
-"""
-Example showing:
-1. Class-based method argument analysis (MethodAnalyzer).
-2. Mapping param_name -> default_value for building dynamic GUI.
-3. Flet-based GUI with custom input types (FileInput, ChoiceInput).
-4. Matplotlib figure rendering with MatplotlibChart.
-5. Stdout redirection to display print outputs on the GUI.
-6. Three-column layout for method arguments, two-column layout for print and figure.
-7. Display selected file path in a read-only TextField.
-"""
-
-import sys,os,time,base64
-import inspect
-import flet as ft
-import matplotlib.pyplot as plt
-
-def encode_image_to_base64(image_path):
-    with open(image_path, "rb") as img_file:
-        img_bytes = img_file.read()
-        encoded_img = base64.b64encode(img_bytes).decode('utf-8')
-        # 画像の形式に応じて適切なMIMEタイプを設定
-        ext = os.path.splitext(image_path)[1].lower()
-        if ext == ".png":
-            mime = "image/png"
-        elif ext in [".jpg", ".jpeg"]:
-            mime = "image/jpeg"
-        elif ext == ".gif":
-            mime = "image/gif"
-        else:
-            mime = "application/octet-stream"
-        return encoded_img
+class MyApp:
+    """Fletアプリケーションのウィジェット管理クラス"""
+    def __init__(self):
+        # 各ウィジェットの初期化
+        self.log_widget = LogWidget()
+        self.file_dialog_widget = FileDialogWidget("Select a file...", self.handle_file)
+        self.dropdown_widget = DropdownWidget(
+            "Choose an option:", ["Option 1", "Option 2", "Option 3"], self.handle_dropdown
+        )
+        self.image_widget = ImageWidget("https://via.placeholder.com/150")
+        self.input_widget = InputWidget("Enter a value:", self.handle_input)
     
-class FileInput:
-    """
-    Represents a file selection requirement for a method argument.
-    """
-
-    def __init__(self, description: str = "Select a file") -> None:
-        self.description = description
-
-    def __str__(self) -> str:
-        return f"FileInput(description='{self.description}')"
-
-
-class ChoiceInput:
-    """
-    Represents a choice (dropdown) for a method argument.
-    """
-
-    def __init__(self, choices: list[str]) -> None:
-        self.choices = choices
-
-    def __str__(self) -> str:
-        return f"ChoiceInput(choices={self.choices})"
-
-
-class MethodAnalyzer:
-    """
-    Analyzes the signature of a given method, extracting the param_name and default_value.
-    Stores the results in a dictionary for further use.
-    """
-
-    def __init__(self, method):
-        self.method = method
-        self.signature = inspect.signature(method)
-        self.arguments_map: dict[str, object] = {}
-
-    def analyze_arguments(self) -> dict[str, object]:
-        """
-        Returns a dictionary mapping:
-            param_name -> default_value (or None if no default).
-        """
-        for param_name, param in self.signature.parameters.items():
-            default_value = param.default
-            if default_value != inspect.Parameter.empty:
-                self.arguments_map[param_name] = default_value
-            else:
-                self.arguments_map[param_name] = None
-        return self.arguments_map
-
-
-class StdoutRedirector:
-    """
-    Redirects sys.stdout to update a Flet Text or similar UI component in real-time.
-    Detects Matplotlib Figure objects and updates the UI with the figure.
-    """
-
-    def __init__(self, stdout_callback, figure_callback) -> None:
-        self._stdout_callback = stdout_callback
-        self._figure_callback = figure_callback
-
-    def write(self, message: str) -> None:
-        # Check if message represents a Matplotlib Figure
-        if os.path.splitext(message)[-1]  in [".png",".jpg",".bmp"] and os.path.exists(message) is True:
-            self._figure_callback(message)
+    def handle_file(self, file_path):
+        """ファイル選択時の処理"""
+        self.log_widget.add_log(file_path)
+        if file_path:
+            self.log_widget.add_log(f"Selected file: {file_path}")
         else:
-            self._stdout_callback(message)
+            self.log_widget.add_log("No file selected")
+    
+    def handle_dropdown(self, value):
+        """ドロップダウン選択時の処理"""
+        self.log_widget.add_log(f"Dropdown selected: {value}")
+    
+    def handle_input(self, value):
+        """入力送信時の処理"""
+        self.log_widget.add_log(f"Input value: {value}")
+    
+    def build_layout(self):
+        """ページレイアウトを生成"""
+        return Column([
+            self.log_widget.get_widget(),
+            self.file_dialog_widget.get_widget()[1],  # ファイル入力フィールドとアイコン
+            self.dropdown_widget.get_widget(),
+            # self.image_widget.get_widget(),
+            self.input_widget.get_widget(),
+        ],expand=True)
+    
+    def get_file_picker(self):
+        """ファイルピッカーウィジェットを取得"""
+        return self.file_dialog_widget.get_widget()[0]
 
-    def flush(self) -> None:
-        """Required for file-like object. (No special action needed here.)"""
-        pass
+def main(page: Page):
+    page.title = "Smart Flet App"
 
-class UIBuilder:
-    def __init__(self, method, page: ft.Page):
-        self.method = method
-        self.page = page
+    # アプリケーションクラスを初期化
+    app = MyApp()
 
-        self.analyzer = MethodAnalyzer(method)
-        self.arguments_map = self.analyzer.analyze_arguments()
+    # レイアウトを生成してページに追加
+    layout = app.build_layout()
+    page.add(app.get_file_picker())  # ファイルピッカーを直接追加
+    page.add(layout)
 
-        # Keep track of Flet controls for each argument
-        self.input_controls: dict[str, dict] = {}
-
-        # Redirect stdout
-        self.original_stdout = sys.stdout
-        self.stdout_text = ft.Text(value="==以下にprint内容==", selectable=True, expand=1)
-        self.chart = ft.Image()  # dummy figure
-        self.stdout_redirector = StdoutRedirector(
-            self.update_stdout_text,
-            self.update_figure
-        )
-        sys.stdout = self.stdout_redirector
-
-        # Create layout containers for 3 columns (arguments area)
-        self.col1 = ft.Column(spacing=10, expand=1, width=450)
-        self.col2 = ft.Column(spacing=10, expand=1, width=450)
-        self.col3 = ft.Column(spacing=10, expand=1, width=450)
-        self.arg_row = ft.Row(controls=[self.col1, self.col2, self.col3], spacing=20)
-
-    def update_stdout_text(self, message) -> None:
-        """
-        Append new print outputs to the stdout_text control.
-        """
-        self.stdout_text.value += message
-        self.page.update()
-        
-    def update_figure(self, message) -> None:
-        """
-        Updates the Matplotlib chart in the GUI with the given figure.
-        """
-        img_src = encode_image_to_base64(message)
-        self.chart.src_base64 = img_src
-        self.page.update()
-
-
-    def build_ui(self) -> None:
-        """
-        Builds the UI controls according to the arguments_map.
-        Places them in a 3-column layout.
-        Then places the Matplotlib chart and stdout text in a 2-column layout.
-        """
-        # Create input fields
-        param_list = list(self.arguments_map.items())
-        for idx, (param_name, default_value) in enumerate(param_list):
-            # Decide which column to put this control in
-            target_col = [self.col1, self.col2, self.col3][idx % 3]
-
-            if isinstance(default_value, FileInput):
-                self._add_file_input(target_col, param_name, default_value)
-            elif isinstance(default_value, ChoiceInput):
-                self._add_choice_input(target_col, param_name, default_value)
-            else:
-                self._add_text_input(target_col, param_name, default_value)
-
-        # Execute button (placed below the argument columns, or in one column)
-        execute_button = ft.ElevatedButton("Execute Method", on_click=self.execute_method)
-
-        # 2-column layout for Matplotlib chart & stdout text
-        result_row = ft.Row(
-            controls=[
-                ft.Row([self.chart],width=750,height=600), 
-                ft.Row([self.stdout_text],width=400,height=600)
-            ],
-            alignment=ft.CrossAxisAlignment.STRETCH,
-            spacing=20,
-            width=1200, 
-        )
-
-        whole_column = ft.Column(
-            [
-                self.arg_row,
-                execute_button
-            ]
-        )
-        self.page.add(whole_column)
-        self.page.add(result_row)
-
-        def on_close(_):
-            sys.stdout = self.original_stdout
-
-        self.page.on_close = on_close
-        self.page.update()
-
-    def _add_file_input(self, target_col: ft.Column, param_name: str, default_value: FileInput) -> None:
-        """
-        Adds a file picker button and a read-only text field to display the file name.
-        """
-        file_picker = ft.FilePicker(
-            on_result=lambda e, n=param_name: self._on_file_result(e, n),
-        )
-        self.page.overlay.append(file_picker)
-
-        pick_button = ft.ElevatedButton(
-            text=default_value.description,
-            on_click=lambda _, fp=file_picker: fp.pick_files(),
-            width=100,
-        )
-
-        file_name_field = ft.TextField(
-            label="Selected file",
-            value="",
-            read_only=False,
-            expand=True,
-            width=300
-        )
-
-        self.input_controls[param_name] = {
-            "type": "file",
-            "value": None,  # Will store the file path here
-            "button": pick_button,
-            "field": file_name_field,
-        }
-
-        # Place both the button and text field in the column
-        target_col.controls.append(ft.Row([file_name_field,pick_button]))
-
-    def _on_file_result(self, e: ft.FilePickerResultEvent, param_name: str) -> None:
-        """
-        Updates the input_controls dict with the selected file path,
-        displays it in the text field.
-        """
-        ctrl_info = self.input_controls[param_name]
-        if e.files:
-            file_path = e.files[0].path
-            ctrl_info["value"] = file_path
-            ctrl_info["field"].value = file_path
-        else:
-            ctrl_info["value"] = ""
-            ctrl_info["field"].value = ""
-        self.page.update()
-
-    def _add_choice_input(self, target_col: ft.Column, param_name: str, default_value: ChoiceInput) -> None:
-        """
-        Adds a dropdown to the page for the given param_name.
-        """
-        dropdown = ft.Dropdown(
-            options=[ft.dropdown.Option(c) for c in default_value.choices],
-            value=default_value.choices[0] if default_value.choices else None,
-            width=350
-        )
-        self.input_controls[param_name] = {
-            "type": "choice",
-            "dropdown": dropdown,
-        }
-        target_col.controls.append(dropdown)
-
-    def _add_text_input(self, target_col: ft.Column, param_name: str, default_value: object) -> None:
-        """
-        Adds a text field to the page for the given param_name.
-        """
-        default_str = str(default_value) if default_value is not None else ""
-        text_field = ft.TextField(
-            label=f"{param_name} (default: {default_str})",
-            value=default_str,
-            width=350
-        )
-        self.input_controls[param_name] = {
-            "type": "text",
-            "field": text_field,
-        }
-        target_col.controls.append(text_field)
-
-    def execute_method(self, _: ft.ControlEvent) -> None:
-        """
-        Collects input values, calls the method, and updates the GUI with outputs.
-        """
-        self.stdout_text.value = ""  # Clear current stdout text
-
-        # Build arguments from input controls
-        args_dict = {}
-        sig = inspect.signature(self.method)
-
-        for name, ctrl_info in self.input_controls.items():
-            param = sig.parameters[name]
-            default_val = param.default
-
-            if ctrl_info["type"] == "file":
-                args_dict[name] = ctrl_info["value"]
-            elif ctrl_info["type"] == "choice":
-                args_dict[name] = ctrl_info["dropdown"].value
-            elif ctrl_info["type"] == "text":
-                raw_value = ctrl_info["field"].value
-                if isinstance(default_val, int):
-                    try:
-                        raw_value = int(raw_value)
-                    except ValueError:
-                        pass
-                args_dict[name] = raw_value
-
-
-        # my_method を実行
-        self.method(**args_dict)
-
-        self.page.update()
-
-
-def gui_run(my_method) -> None:
-    """
-    Entry point for the Flet application.
-    """
-    def main(page: ft.Page) -> None:
-        """
-        Entry point for the Flet application.
-        """
-        page.title = "Class-based Flet & Matplotlib Demo (3-column & 2-column layout)"
-        page.scroll = "auto"
-
-        ui_builder = UIBuilder(my_method, page)
-        ui_builder.build_ui()
-    ft.app(target=main)
+# Fletアプリの実行
+if __name__ == "__main__":
+    app(target=main, view="web_browser", port=8080)
